@@ -6,6 +6,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
   :root {
@@ -1201,6 +1202,17 @@
     </div>
   </div>
 
+  <div class="panel export-panel" style="margin-top:16px;margin-bottom:0;">
+    <h3 style="margin-bottom:10px;">Datos del Excel</h3>
+    <p class="hint" style="margin-bottom:8px;"><strong>Importar Excel:</strong> trae a la página los clientes, importes, períodos adeudados y estados del archivo (también podés arrastrarlo a esta ventana).</p>
+    <p class="hint"><strong>Exportar Excel:</strong> descarga un Excel con todo lo cargado en la página. Hacelo después de cada carga mensual y reemplazá el archivo de la carpeta, así siempre tenés el Excel al día.</p>
+    <div class="actions">
+      <button class="btn primary" id="importExcelBtn">Importar Excel</button>
+      <button class="btn" id="exportExcelBtn">Exportar Excel</button>
+      <input type="file" id="excelFileInput" accept=".xlsx,.xls,.xlsm" class="attach-input">
+    </div>
+  </div>
+
   <footer class="note">Estudio Contable Z&V</footer>
 </div>
 
@@ -1334,6 +1346,14 @@ function loadFormatoOverrides() {
 function saveFormatoOverrides(f) {
   localStorage.setItem(FORMATO_KEY, JSON.stringify(f));
 }
+const DATOS_KEY = "vep_monotributo_estudio_flamini_datos_v1";
+function loadDatos() {
+  try { return JSON.parse(localStorage.getItem(DATOS_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+function saveDatos(d) {
+  localStorage.setItem(DATOS_KEY, JSON.stringify(d));
+}
 function displayName(c) {
   const ov = nameOverrides[c.cliente];
   return (ov && ov.nuevo) || c.cliente;
@@ -1362,6 +1382,7 @@ let imageAttachments = loadImages();
 let descriptions = loadDescriptions();
 let nameOverrides = loadNameOverrides();
 let formatoOverrides = loadFormatoOverrides();
+let datosOverrides = loadDatos();
 let editingClientName = null;
 let editingFormatoClient = null;
 let openCard = null;
@@ -1381,7 +1402,7 @@ function activeMonthKey() { return `${activeYear}-${pad2(activeMonthNum)}`; }
 function monthKeyDisplay(mk) { const [y, m] = mk.split("-"); return `${m}/${y}`; }
 
 function allClientes() {
-  return CLIENTES.concat(customClientes);
+  return CLIENTES.concat(customClientes).map(c => datosOverrides[c.cliente] ? Object.assign({}, c, datosOverrides[c.cliente]) : c);
 }
 
 function effectiveEmail(c) {
@@ -1403,7 +1424,7 @@ function pendingChanges() {
     if (fv !== undefined && fv !== (c.formatoVep || "")) formatoUpdates.push({cliente: c.cliente, formatoVep: fv});
   });
   const renames = Object.values(nameOverrides).filter(r => r && !r.excelSynced);
-  return {emailUpdates, formatoUpdates, renames, nuevos: customClientes};
+  return {emailUpdates, formatoUpdates, renames, nuevos: customClientes.filter(c => !c.fromExcel)};
 }
 
 function pendingChangesText() {
@@ -1568,7 +1589,7 @@ function render() {
     head.className = "card-head";
     const medioIsWhatsapp = c.medio && c.medio.trim().toLowerCase() === "whatsapp";
     const medioLabel = c.medio && c.medio.trim().toLowerCase().startsWith("correo") ? "" : `<span class="badge ${medioIsWhatsapp ? "whatsapp" : "medio"}">${c.medio || "?"}</span>`;
-    const newLabel = c.custom ? `<span class="badge medio">Nuevo</span>` : "";
+    const newLabel = c.custom && !c.fromExcel ? `<span class="badge medio">Nuevo</span>` : "";
     const isEditingFormato = editingFormatoClient === c.cliente;
     const currentFormato = effectiveFormato(c);
     const formatoOptions = ["", "QR", "Red link", "Pago mis cuentas"];
@@ -1827,7 +1848,7 @@ function render() {
         const thumbHtml = img
           ? (isImg
               ? `<img src="${img.dataUrl}" alt="${escapeAttr(img.name)}" class="attach-thumb">`
-              : `<div class="attach-thumb attach-thumb-doc">PDF</div>`)
+              : `<div class="attach-thumb attach-thumb-doc">${escapeHtml((img.name.includes(".") ? img.name.split(".").pop() : "ARCH").toUpperCase().slice(0, 4))}</div>`)
           : "";
         const attachHtml = img
           ? `<div class="attach-row">
@@ -1839,8 +1860,8 @@ function render() {
                <button class="btn" data-remove-img>Quitar</button>
              </div>`
           : `<div class="attach-row attach-empty">
-               <label class="btn" for="img-${cssId(c.cliente)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg> Adjuntar VEP en PDF</label>
-               <span class="attach-hint">Subí el VEP en PDF de este cliente para que se adjunte al borrador de Gmail.</span>
+               <label class="btn" for="img-${cssId(c.cliente)}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg> Adjuntar VEP</label>
+               <span class="attach-hint">Subí el VEP de este cliente (PDF, imagen, Word, Excel, etc.) para que se adjunte al borrador de Gmail.</span>
              </div>`;
 
         slot.innerHTML = `
@@ -1850,7 +1871,7 @@ function render() {
               <span class="lbl">Cuerpo (editable)</span>
               <textarea rows="6">${escapeHtml(bodyText)}</textarea>
             </div>
-            <input type="file" accept="image/*,application/pdf" id="img-${cssId(c.cliente)}" class="attach-input">
+            <input type="file" id="img-${cssId(c.cliente)}" class="attach-input">
             ${attachHtml}
             <div class="actions">
               ${esCorreo && emailParaCopiar ? '<button class="btn primary" data-copy="email">Copiar correo</button>' : ''}
@@ -1881,8 +1902,6 @@ function render() {
         imgInput.addEventListener("change", () => {
           const file = imgInput.files && imgInput.files[0];
           if (!file) return;
-          const isValidType = file.type.startsWith("image/") || file.type === "application/pdf";
-          if (!isValidType) { toast("Elegí una imagen o un PDF.", true); return; }
           if (file.size > 4 * 1024 * 1024) { toast("El documento es muy pesado (máx. 4 MB).", true); return; }
           const reader = new FileReader();
           reader.onload = () => {
@@ -2428,6 +2447,221 @@ async function checkSentDrafts() {
 document.getElementById("gmailDraftsBtn").addEventListener("click", syncDraftsToGmail);
 document.getElementById("gmailCheckBtn").addEventListener("click", checkSentDrafts);
 
+// --- Importar / exportar Excel ---
+const CAN_DOWNLOAD = true;
+const EXCEL_HEADERS = ["CONTRIBUYENTE MENSUAL", "CUIT", "CUIT GENERADOR", "IMPORTE MONOTRIBUTO", "FORMATO VEP", "MESES DEUDA", "MEDIO", "A QUE CORREO SE ENVIA?", "OBSERVACIONES"];
+const HIST_HEADERS = ["Contribuyente", "Mes", "Importe", "Períodos adeudados", "Estado"];
+const EXCEL_CANON = {"QR": "QR", "RED LINK": "Red link", "PAGO MIS CUENTAS": "Pago mis cuentas", "CORREO": "Correo", "WHATSAPP": "Whatsapp"};
+
+function xlNorm(s) {
+  return String(s == null ? "" : s).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toUpperCase();
+}
+function xlText(v) { return v == null ? "" : String(v).trim(); }
+function xlAmount(v) {
+  if (typeof v === "number") return isNaN(v) ? "" : String(v);
+  let s = String(v == null ? "" : v).replace(/[$\s]/g, "");
+  if (!s) return "";
+  if (s.includes(",")) s = s.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  const n = parseFloat(s);
+  return isNaN(n) ? "" : String(n);
+}
+function xlMonthKey(v) {
+  const s = xlText(v);
+  let m = s.match(/^(\d{4})-(\d{1,2})$/);
+  if (m) return `${m[1]}-${pad2(+m[2])}`;
+  m = s.match(/^(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[2]}-${pad2(+m[1])}`;
+  return "";
+}
+function xlFindClient(name) {
+  const k = xlNorm(name);
+  return allClientes().find(c => xlNorm(c.cliente) === k || xlNorm(displayName(c)) === k);
+}
+function setRecFor(mk, name, patch) {
+  if (!state[mk]) state[mk] = {};
+  const base = state[mk][name] || {monto: "", mesesDeuda: "", estado: "", body: "", bodyKey: ""};
+  state[mk][name] = Object.assign(base, patch);
+  fbWrite(`state/${mk}/${fbKey(name)}`, Object.assign({cliente: name}, state[mk][name]));
+}
+function applyClientPatch(c, patch, rowName) {
+  const custom = customClientes.find(x => x.cliente === c.cliente);
+  if (custom) {
+    Object.assign(custom, patch, {fromExcel: true});
+    fbWrite(`customClientes/${fbKey(custom.cliente)}`, custom);
+  } else {
+    datosOverrides[c.cliente] = Object.assign({}, datosOverrides[c.cliente], patch);
+    fbWrite(`datosOverrides/${fbKey(c.cliente)}`, Object.assign({cliente: c.cliente}, datosOverrides[c.cliente]));
+  }
+  if ("email" in patch && emailOverrides[c.cliente] !== undefined) {
+    delete emailOverrides[c.cliente];
+    fbRemove(`emails/${fbKey(c.cliente)}`);
+  }
+  if ("formatoVep" in patch && formatoOverrides[c.cliente] !== undefined) {
+    delete formatoOverrides[c.cliente];
+    fbRemove(`formatoOverrides/${fbKey(c.cliente)}`);
+  }
+  const ov = nameOverrides[c.cliente];
+  if (ov && !ov.excelSynced && xlNorm(ov.nuevo) === xlNorm(rowName)) {
+    nameOverrides[c.cliente] = Object.assign({}, ov, {excelSynced: true});
+    fbWrite(`nameOverrides/${fbKey(c.cliente)}`, nameOverrides[c.cliente]);
+  }
+}
+function xlColumns(headerRow, spec) {
+  const col = {};
+  headerRow.forEach((h, i) => {
+    const k = xlNorm(h);
+    Object.keys(spec).forEach(key => { if (col[key] === undefined && spec[key](k)) col[key] = i; });
+  });
+  return col;
+}
+
+async function importExcelFile(file) {
+  if (typeof XLSX === "undefined") { toast("No se pudo cargar el lector de Excel. Revisá tu conexión y recargá la página.", true); return; }
+  let wb;
+  try { wb = XLSX.read(await file.arrayBuffer(), {type: "array"}); }
+  catch (e) { toast("No se pudo leer el archivo. Probá con un Excel .xlsx válido.", true); return; }
+  const histName = wb.SheetNames.find(n => xlNorm(n) === "HISTORIAL");
+  const mainName = wb.SheetNames.find(n => n !== histName && xlNorm(n).includes("VEP")) || wb.SheetNames.find(n => n !== histName);
+  if (!mainName) { toast("El Excel no tiene hojas con datos.", true); return; }
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[mainName], {header: 1, defval: ""});
+  const hIdx = rows.findIndex(r => r.some(c => xlNorm(c).startsWith("CONTRIBUYENTE")));
+  if (hIdx < 0) { toast("No encontré la columna CONTRIBUYENTE en la primera hoja del Excel.", true); return; }
+  const col = xlColumns(rows[hIdx], {
+    nombre: k => k.startsWith("CONTRIBUYENTE"),
+    cuit: k => k === "CUIT",
+    gen: k => k === "CUIT GENERADOR",
+    importe: k => k.startsWith("IMPORTE"),
+    formato: k => k === "FORMATO VEP",
+    deuda: k => k.startsWith("MESES DEUDA") || k.startsWith("PERIODOS ADEUDADOS"),
+    medio: k => k === "MEDIO",
+    email: k => k.startsWith("A QUE CORREO"),
+    obs: k => k === "OBSERVACIONES"
+  });
+  const has = k => col[k] !== undefined;
+  const activeMk = activeMonthKey();
+  let updated = 0, created = 0, monthly = 0;
+
+  rows.slice(hIdx + 1).forEach(r => {
+    const nombre = xlText(r[col.nombre]);
+    if (!nombre) return;
+    const patch = {};
+    if (has("cuit")) patch.cuit = xlText(r[col.cuit]);
+    if (has("gen")) patch.cuitGenerador = xlText(r[col.gen]);
+    if (has("formato")) { const f = xlText(r[col.formato]); patch.formatoVep = EXCEL_CANON[xlNorm(f)] || f; }
+    if (has("medio")) { const m = xlText(r[col.medio]); patch.medio = EXCEL_CANON[xlNorm(m)] || m; }
+    if (has("email")) patch.email = xlText(r[col.email]);
+    if (has("obs")) patch.observaciones = xlText(r[col.obs]);
+    let c = xlFindClient(nombre);
+    if (c) {
+      applyClientPatch(c, patch, nombre);
+      updated++;
+    } else {
+      const nuevo = Object.assign({cliente: nombre.toUpperCase(), cuit: "", cuitGenerador: "", formatoVep: "", medio: "", email: "", observaciones: "", custom: true, fromExcel: true}, patch);
+      if (!nuevo.cuitGenerador) nuevo.cuitGenerador = nuevo.cuit;
+      customClientes.push(nuevo);
+      fbWrite(`customClientes/${fbKey(nuevo.cliente)}`, nuevo);
+      c = nuevo;
+      created++;
+    }
+    if (!histName && has("importe")) {
+      const monto = xlAmount(r[col.importe]);
+      const deuda = has("deuda") ? xlText(r[col.deuda]) : "";
+      if (monto || deuda) { setRecFor(activeMk, c.cliente, {monto, mesesDeuda: deuda}); monthly++; }
+    }
+  });
+
+  if (histName) {
+    const hrows = XLSX.utils.sheet_to_json(wb.Sheets[histName], {header: 1, defval: ""});
+    const hh = hrows.findIndex(r => r.some(c => xlNorm(c).startsWith("CONTRIBUYENTE")));
+    if (hh >= 0) {
+      const hc = xlColumns(hrows[hh], {
+        nombre: k => k.startsWith("CONTRIBUYENTE"),
+        mes: k => k === "MES",
+        importe: k => k.startsWith("IMPORTE"),
+        deuda: k => k.startsWith("PERIODOS ADEUDADOS") || k.startsWith("MESES DEUDA"),
+        estado: k => k === "ESTADO"
+      });
+      hrows.slice(hh + 1).forEach(r => {
+        const c = xlFindClient(xlText(r[hc.nombre]));
+        const mk = xlMonthKey(r[hc.mes]);
+        if (!c || !mk) return;
+        const monto = hc.importe !== undefined ? xlAmount(r[hc.importe]) : "";
+        const deuda = hc.deuda !== undefined ? xlText(r[hc.deuda]) : "";
+        let estado = hc.estado !== undefined ? xlText(r[hc.estado]) : "";
+        if (estado !== "Pendiente" && estado !== "Enviado") estado = "";
+        if (!monto && !deuda && !estado) return;
+        setRecFor(mk, c.cliente, {monto, mesesDeuda: deuda, estado});
+        monthly++;
+      });
+    }
+  }
+
+  saveState(state);
+  saveCustomClientes(customClientes);
+  saveDatos(datosOverrides);
+  saveEmails(emailOverrides);
+  saveFormatoOverrides(formatoOverrides);
+  saveNameOverrides(nameOverrides);
+  renderMonthTabs();
+  render();
+  updateChangesBtn();
+  renderChangesPanel();
+  let msg = `Excel importado: ${updated} clientes actualizados`;
+  if (created) msg += `, ${created} nuevos`;
+  if (monthly) msg += `, ${monthly} registros mensuales`;
+  toast(msg);
+}
+
+function exportExcel() {
+  if (!CAN_DOWNLOAD) { toast("La descarga de Excel funciona en la versión publicada, no en esta vista previa.", true); return; }
+  if (typeof XLSX === "undefined") { toast("No se pudo cargar el generador de Excel. Revisá tu conexión y recargá la página.", true); return; }
+  const asNum = v => /^\d+$/.test(v) ? Number(v) : v;
+  const clientes = allClientes().slice().sort((a, b) => displayName(a).localeCompare(displayName(b), "es"));
+  const main = [EXCEL_HEADERS].concat(clientes.map(c => {
+    const rec = getRec(c.cliente);
+    const n = parseFloat(rec.monto);
+    return [displayName(c), asNum(c.cuit || ""), asNum(c.cuitGenerador || ""), isNaN(n) ? "" : n, effectiveFormato(c), rec.mesesDeuda || "", c.medio || "", effectiveEmail(c) || "", c.observaciones || ""];
+  }));
+  const hist = [HIST_HEADERS];
+  Object.keys(state).sort().forEach(mk => {
+    clientes.forEach(c => {
+      const rec = state[mk] && state[mk][c.cliente];
+      if (!rec || !(rec.monto || rec.mesesDeuda || rec.estado)) return;
+      const n = parseFloat(rec.monto);
+      hist.push([displayName(c), mk, isNaN(n) ? "" : n, rec.mesesDeuda || "", rec.estado || ""]);
+    });
+  });
+  const ws1 = XLSX.utils.aoa_to_sheet(main);
+  ws1["!cols"] = [{wch: 34}, {wch: 14}, {wch: 16}, {wch: 20}, {wch: 18}, {wch: 22}, {wch: 12}, {wch: 42}, {wch: 34}];
+  const ws2 = XLSX.utils.aoa_to_sheet(hist);
+  ws2["!cols"] = [{wch: 34}, {wch: 10}, {wch: 14}, {wch: 26}, {wch: 12}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws1, "VEP MONOTRIBUTO MENSUAL");
+  XLSX.utils.book_append_sheet(wb, ws2, "Historial");
+  XLSX.writeFile(wb, "VEP MONOTRIBUTO MENSUAL.xlsx");
+  toast("Excel descargado");
+}
+
+const excelInput = document.getElementById("excelFileInput");
+document.getElementById("importExcelBtn").addEventListener("click", () => excelInput.click());
+excelInput.addEventListener("change", () => {
+  const f = excelInput.files && excelInput.files[0];
+  excelInput.value = "";
+  if (f) importExcelFile(f);
+});
+document.getElementById("exportExcelBtn").addEventListener("click", exportExcel);
+window.addEventListener("dragover", e => {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) e.preventDefault();
+});
+window.addEventListener("drop", e => {
+  const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+  if (!f || e.target === excelInput) return;
+  e.preventDefault();
+  if (/\.(xlsx|xlsm|xls)$/i.test(f.name)) importExcelFile(f);
+  else toast("Arrastrá un archivo Excel (.xlsx).", true);
+});
+
 document.addEventListener("wheel", (e) => {
   if (e.target.tagName === "INPUT" && e.target.type === "number" && document.activeElement === e.target) {
     e.target.blur();
@@ -2484,6 +2718,21 @@ function attachFbListeners() {
     });
     emailOverrides = newEmails;
     saveEmails(emailOverrides);
+    safeRerender();
+  });
+
+  fbDb.ref(`${FB_NS}/datosOverrides`).on("value", snap => {
+    const val = snap.val() || {};
+    const newDatos = {};
+    Object.keys(val).forEach(k => {
+      const r = val[k];
+      if (!r || !r.cliente) return;
+      const rest = Object.assign({}, r);
+      delete rest.cliente;
+      newDatos[r.cliente] = rest;
+    });
+    datosOverrides = newDatos;
+    saveDatos(datosOverrides);
     safeRerender();
   });
 
